@@ -1,0 +1,1165 @@
+{
+  "name": "Youshine US Enrollment Partnership OS",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8aad6c9a-9a2c-415f-9004-43e055e85a27",
+      "name": "Start Partnership OS",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k",
+          "mode": "list",
+          "cachedResultName": "Youshine US School Partnership Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Partnership Tracker"
+        },
+        "options": {}
+      },
+      "id": "cf412f5b-c2dc-474f-b93c-309dbecf2434",
+      "name": "Load Partnership Tracker",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        160,
+        256
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JoSqzkCeEZefM0se",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const states = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};\nconst fips = {AL:1,AK:2,AZ:4,AR:5,CA:6,CO:8,CT:9,DE:10,FL:12,GA:13,HI:15,ID:16,IL:17,IN:18,IA:19,KS:20,KY:21,LA:22,ME:23,MD:24,MA:25,MI:26,MN:27,MS:28,MO:29,MT:30,NE:31,NV:32,NH:33,NJ:34,NM:35,NY:36,NC:37,ND:38,OH:39,OK:40,OR:41,PA:42,RI:44,SC:45,SD:46,TN:47,TX:48,UT:49,VT:50,VA:51,WA:53,WV:54,WI:55,WY:56};\nreturn Object.keys(states).map(function (abbr) {\n  return { json: { state: abbr, stateName: states[abbr], fips: fips[abbr] } };\n});"
+      },
+      "id": "541c7f12-57ec-4cca-a7d4-437eb293ae9f",
+      "name": "Build 50-State Research Plan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://educationdata.urban.org/api/v1/college-university/ipeds/directory/2021/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fips",
+              "value": "={{ $json.fips }}"
+            },
+            {
+              "name": "inst_control",
+              "value": "2"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "47c4435d-e8c9-43a3-b90b-776405743ff4",
+      "name": "Discover Private Universities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        128
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Every new prospect starts locked: nothing is verified, reviewed or approved for outreach.\nconst existing = new Set();\nfor (const row of $('Load Partnership Tracker').all()) {\n  const nm = row.json['School Name'];\n  if (nm) existing.add((String(nm) + '|' + String(row.json['State'] || '')).toLowerCase());\n}\nconst today = new Date().toISOString().slice(0, 10);\nconst out = [];\n\nfunction addRow(r) {\n  const key = (r.name + '|' + r.state).toLowerCase();\n  if (existing.has(key)) return;\n  existing.add(key);\n  out.push({ json: {\n    'School Name': r.name,\n    'State': r.state,\n    'School Type': r.type,\n    'Website': r.website || '',\n    'SEVP Status': 'Unverified',\n    'Agent Policy': 'Unverified',\n    'Commission Policy': 'Unverified',\n    'Partnership Status': 'Discovered - Needs Verification',\n    'Notes': 'Added ' + today + ' by Partnership OS. Source: ' + r.source + (r.city ? ' | City: ' + r.city : '') + ' | Suggested revenue model: ' + r.fit\n  } });\n}\n\nfor (const item of $input.all()) {\n  const results = Array.isArray(item.json.results) ? item.json.results : (item.json.inst_name ? [item.json] : []);\n  for (const s of results) {\n    const name = s.inst_name;\n    if (!name) continue;\n    // Defensive gates: private nonprofit, active, degree-granting only.\n    if (Number(s.inst_control) !== 2) continue;\n    if (String(s.inst_status) !== '1') continue;\n    if (Number(s.currently_active_ipeds) !== 1) continue;\n    if (Number(s.degree_granting) !== 1) continue;\n    if (s.date_closed && String(s.date_closed) !== '-2') continue;\n    const url = String(s.url_school || '').trim();\n    addRow({\n      id: 'UNIV-' + s.unitid,\n      name: name,\n      type: 'Private University/College',\n      state: s.state_abbr || '',\n      city: s.city || '',\n      website: url && url.indexOf('http') !== 0 ? 'https://' + url : url,\n      source: 'US Dept. of Education IPEDS directory via Urban Institute Education Data Portal (private nonprofit)',\n      fit: 'School-Paid Recruitment (primary); Family-Paid Consulting (secondary)'\n    });\n  }\n}\n\n// Private high schools have no reliable open API: create one research task per state.\nfor (const st of $('Build 50-State Research Plan').all()) {\n  addRow({\n    id: 'HS-QUEUE-' + st.json.state,\n    name: 'Private high school research queue - ' + st.json.stateName,\n    type: 'Private High School (research task)',\n    state: st.json.state,\n    city: '',\n    website: '',\n    source: 'Manual research: NCES Private School Survey + state accreditation lists. Add one row per school.',\n    fit: 'School-Paid Recruitment or Family-Paid Consulting'\n  });\n}\n\nreturn out;"
+      },
+      "id": "b4ec1e47-dfa2-422c-8d12-e43eb6644a6f",
+      "name": "Normalize and Apply Compliance Gates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k",
+          "mode": "list",
+          "cachedResultName": "Youshine US School Partnership Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Partnership Tracker"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "School Name",
+              "displayName": "School Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "State",
+              "displayName": "State",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "School Type",
+              "displayName": "School Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Admissions Contact",
+              "displayName": "Admissions Contact",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Contact Email",
+              "displayName": "Contact Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "International Students",
+              "displayName": "International Students",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "SEVP Status",
+              "displayName": "SEVP Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Agent Policy",
+              "displayName": "Agent Policy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Commission Policy",
+              "displayName": "Commission Policy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Partnership Status",
+              "displayName": "Partnership Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Revenue Model",
+              "displayName": "Revenue Model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Next Follow-up",
+              "displayName": "Next Follow-up",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Outreach Draft",
+              "displayName": "Outreach Draft",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "handlingExtraData": "ignoreIt"
+        }
+      },
+      "id": "98a65ccc-04ad-4b38-8b75-db7cb29ceff5",
+      "name": "Save New Prospects to Tracker",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1168,
+        128
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JoSqzkCeEZefM0se",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json[\"Partnership Status\"] }}",
+              "rightValue": "Approved for Outreach",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "1d59311e-46f6-4a65-b7d6-22fc4eb1d7af"
+            },
+            {
+              "leftValue": "={{ $json[\"SEVP Status\"] }}",
+              "rightValue": "Verified",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "e821aac0-2964-438a-a6cc-2f6a9f812ab3"
+            },
+            {
+              "leftValue": "={{ $json[\"Commission Policy\"] }}",
+              "rightValue": "Verified",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "4f8b1e53-a8fa-42a9-861f-edf121a1fcce"
+            },
+            {
+              "leftValue": "={{ $json[\"Revenue Model\"] }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "id": "44662798-6992-43c6-9b50-d74ce855581c"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "739121f4-383e-4f0f-8de7-1e3c1206dc52",
+      "name": "Only Reviewed and Verified Schools",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "School Name",
+              "type": "string",
+              "value": "={{ $json[\"School Name\"] }}"
+            },
+            {
+              "id": "a0",
+              "name": "State",
+              "type": "string",
+              "value": "={{ $json[\"State\"] }}"
+            },
+            {
+              "id": "a2",
+              "name": "Outreach Draft",
+              "type": "string",
+              "value": "={{ \"[DRAFT - NOT SENT. Final human review required before any outreach.]\\n\\nSubject: Partnership inquiry - \" + $json[\"School Name\"] + \"\\n\\nDear \" + $json[\"School Name\"] + \" Admissions Team,\\n\\n\" + ($json[\"Revenue Model\"].toLowerCase().includes(\"family\") ? \"Youshine provides educational consulting for international families considering US schools. Our fees are paid by families, we disclose them up front, and we will only work with \" + $json[\"School Name\"] + \" in line with your written policies on third-party advisors. We would welcome the chance to learn how you prefer to work with consultants.\" : \"Youshine supports international student recruitment for US schools. We are interested in a school-paid recruitment partnership with \" + $json[\"School Name\"] + \", under a written agreement that documents your authorization and any commission or fee terms.\") + \"\\n\\nBest regards,\\nYoushine Global Enrollment Team\" }}"
+            },
+            {
+              "id": "a3",
+              "name": "Partnership Status",
+              "type": "string",
+              "value": "Outreach Drafted - Awaiting Manual Send"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9a5e46fe-716c-42fb-858b-79cc0823b5a4",
+      "name": "Draft Outreach (Not Sent)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k",
+          "mode": "list",
+          "cachedResultName": "Youshine US School Partnership Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Partnership Tracker"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "School Name",
+            "State"
+          ],
+          "schema": [
+            {
+              "id": "School Name",
+              "displayName": "School Name",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "State",
+              "displayName": "State",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Outreach Draft",
+              "displayName": "Outreach Draft",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "Partnership Status",
+              "displayName": "Partnership Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {
+          "handlingExtraData": "ignoreIt"
+        }
+      },
+      "id": "51ea57a9-0086-4d07-a01e-9f905ecbbe02",
+      "name": "Save Draft and Status to Tracker",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        944,
+        320
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JoSqzkCeEZefM0se",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://nces.ed.gov/surveys/pss/zip/pss2122_pu_csv.zip",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "a4430dec-3ebe-4895-ab62-66e3ae1eb037",
+      "name": "Download PSS ZIP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        464
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "id": "286b5997-465d-4a9b-b2e9-9777716e0671",
+      "name": "Decompress ZIP",
+      "type": "n8n-nodes-base.compression",
+      "typeVersion": 1.1,
+      "position": [
+        848,
+        464
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst keys = Object.keys(item.binary || {});\nif (!keys.length) { throw new Error('No binary file after decompress'); }\nconst buf = await this.helpers.getBinaryDataBuffer(0, keys[0]);\nconst text = buf.toString('latin1');\nconst splitLine = (line) => {\n  const out = []; let cur = ''; let q = false;\n  for (let i = 0; i < line.length; i++) {\n    const c = line[i];\n    if (c === '\"') { if (q && line[i + 1] === '\"') { cur += '\"'; i++; } else { q = !q; } }\n    else if (c === ',' && !q) { out.push(cur); cur = ''; }\n    else { cur += c; }\n  }\n  out.push(cur);\n  return out;\n};\nconst lines = text.split(/\\r?\\n/);\nconst header = splitLine(lines[0]).map(h => h.trim());\nconst idx = {};\n['PPIN','PINST','PCITY','PSTABB','LEVEL','LOGR2022','HIGR2022','NUMSTUDS','TYPOLOGY','ORIENT','RELIG'].forEach(k => { idx[k] = header.indexOf(k); });\nconst missing = Object.keys(idx).filter(k => idx[k] < 0);\nlet total = 0, badWidth = 0;\nconst byState = {};\nconst rows = [];\nfor (let n = 1; n < lines.length; n++) {\n  if (!lines[n]) continue;\n  const f = splitLine(lines[n]);\n  total++;\n  if (f.length !== header.length) { badWidth++; continue; }\n  const st = f[idx.PSTABB];\n  if (st !== 'CA' && st !== 'MA') continue;\n  byState[st] = byState[st] || { all: 0, secondaryOrCombined: 0 };\n  byState[st].all++;\n  const lvl = f[idx.LEVEL];\n  if (lvl === '2' || lvl === '3') {\n    byState[st].secondaryOrCombined++;\n    rows.push({ ppin: f[idx.PPIN], name: f[idx.PINST], city: f[idx.PCITY], state: st, level: lvl, lowGrade: f[idx.LOGR2022], highGrade: f[idx.HIGR2022], students: f[idx.NUMSTUDS], typology: f[idx.TYPOLOGY] });\n  }\n}\n\nconst selected = ['CA', 'MA'].flatMap(st =>\n  rows\n    .filter(r =>\n      r.state === st &&\n      Number(r.students) >= 100 &&\n      !['9'].includes(String(r.typology))\n    )\n    .sort((a, b) => Number(b.students) - Number(a.students))\n    .slice(0, 10)\n);\nconst existing = new Set(\n  $('Load Partnership Tracker').all()\n    .map(item =>\n      `${String(item.json['School Name'] || '').trim().toUpperCase()}|${String(item.json['State'] || '').trim().toUpperCase()}`\n    )\n);\n\nconst unique = selected.filter(r =>\n  !existing.has(`${String(r.name).trim().toUpperCase()}|${String(r.state).trim().toUpperCase()}`)\n);\nreturn unique.slice(0, 20).map(r => ({\n  json: {\n    \"School Name\": r.name,\n    \"State\": r.state,\n    \"School Type\": \"Private High School\",\n    \"Website\": \"\",\n    \"SEVP Status\": \"Unverified\",\n    \"Agent Policy\": \"Unverified\",\n    \"Commission Policy\": \"Unverified\",\n    \"Partnership Status\": \"Discovered - Needs Verification\",\n    \"Revenue Model\": \"\",\n    \"Notes\": `NCES PSS 2021-22; PPIN: ${r.ppin}; City: ${r.city}; Enrollment: ${r.students}; Boarding: Unverified; Source: https://nces.ed.gov/surveys/pss/; SEVP check: https://studyinthestates.dhs.gov/school-search`\n  }\n}));\n"
+      },
+      "id": "d8ffc69c-e668-483a-b48c-34783e96a1f9",
+      "name": "Parse and Filter PSS CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        464
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k",
+          "mode": "list",
+          "cachedResultName": "Youshine US School Partnership Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Partnership Tracker"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "School Name",
+              "displayName": "School Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "State",
+              "displayName": "State",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "School Type",
+              "displayName": "School Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Admissions Contact",
+              "displayName": "Admissions Contact",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Contact Email",
+              "displayName": "Contact Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "International Students",
+              "displayName": "International Students",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "SEVP Status",
+              "displayName": "SEVP Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Agent Policy",
+              "displayName": "Agent Policy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Commission Policy",
+              "displayName": "Commission Policy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Partnership Status",
+              "displayName": "Partnership Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Revenue Model",
+              "displayName": "Revenue Model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Next Follow-up",
+              "displayName": "Next Follow-up",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Outreach Draft",
+              "displayName": "Outreach Draft",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "handlingExtraData": "ignoreIt"
+        }
+      },
+      "id": "fb2861a9-c288-4daa-b9e6-2b6dc95145ab",
+      "name": "Save New Prospects to Tracker1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        960,
+        608
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JoSqzkCeEZefM0se",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.harker.org/admission",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1184,
+        608
+      ],
+      "id": "620cf85c-2e80-4535-a98d-c3cac771992c",
+      "name": "HTTP Request",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst html = String($input.first().json.data || '');\n\nconst title = html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1]\n  ?.replace(/\\s+/g, ' ').trim() || '';\n\nconst emails = [...new Set(\n  (html.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/gi) || [])\n    .filter(e => !/\\.(png|jpg|jpeg|gif|webp|svg)$/i.test(e))\n)];\n\nreturn [{\n  json: {\n    \"School Name\": \"The Harker School\",\n    \"State\": \"CA\",\n    \"School Type\": \"Private High School\",\n    \"Website\": \"https://www.harker.org/\",\n    \"Page Title\": title,\n    \"Emails Found (Unverified)\": emails.slice(0, 20),\n    \"SEVP Status\": \"Unverified\",\n    \"Agent Policy\": \"Unverified\",\n    \"Commission Policy\": \"Unverified\",\n    \"Partnership Status\": \"Discovered - Needs Verification\"\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        608
+      ],
+      "id": "bf6681bd-abcf-4228-ae8d-6c3a13ca392f",
+      "name": "Code in JavaScript",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nreturn $input.all().map(item => {\n  const school = item.json[\"School Name\"] || \"The Harker School\";\n\n  const draft = `Subject: Exploring Educational Collaboration with ${school}\n\nDear Upper School Admissions Team,\n\nI hope this message finds you well.\n\nI'm Carrie, Founder of Youshine Education. Over the past six years, we have supported more than 2,000 families with educational planning and school admissions.\n\nWe would love to explore potential collaboration with ${school}, including educational programs, family engagement, and opportunities to connect prospective students with your school.\n\nWould your team be open to a brief introductory conversation?\n\nWarm regards,\nCarrie\nFounder, Youshine Education`;\n\n  return {\n    json: {\n      ...item.json,\n      \"Contact Email\": \"admissionUS@harker.org\",\n      \"Outreach Draft\": draft,\n      \"Partnership Status\": \"Outreach Drafted - Awaiting Manual Review\"\n    }\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        608
+      ],
+      "id": "be8525ad-da3e-4b43-9198-10e0cc167d69",
+      "name": "Code in JavaScript1",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k",
+          "mode": "list",
+          "cachedResultName": "Youshine US School Partnership Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Partnership Tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sQ9LAnzKisFYnfjuIYkPEAPJkiO5blzv-M_EH9wdb_k/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "School Name": "={{ $json[\"School Name\"] }}",
+            "Outreach Draft": "={{ $json[\"Outreach Draft\"] }}",
+            "Partnership Status": "={{ $json[\"Partnership Status\"] }}"
+          },
+          "matchingColumns": [
+            "School Name"
+          ],
+          "schema": [
+            {
+              "id": "School Name",
+              "displayName": "School Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "State",
+              "displayName": "State",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "School Type",
+              "displayName": "School Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Website",
+              "displayName": "Website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Admissions Contact",
+              "displayName": "Admissions Contact",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Contact Email",
+              "displayName": "Contact Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "International Students",
+              "displayName": "International Students",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SEVP Status",
+              "displayName": "SEVP Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Agent Policy",
+              "displayName": "Agent Policy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Commission Policy",
+              "displayName": "Commission Policy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Partnership Status",
+              "displayName": "Partnership Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Revenue Model",
+              "displayName": "Revenue Model",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Next Follow-up",
+              "displayName": "Next Follow-up",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Outreach Draft",
+              "displayName": "Outreach Draft",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1856,
+        608
+      ],
+      "id": "04eafd4f-5e93-46a0-a347-6b52eda7698a",
+      "name": "Update row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "JoSqzkCeEZefM0se",
+          "name": "Google Sheets account 2"
+        }
+      },
+      "disabled": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Start Partnership OS": {
+      "main": [
+        [
+          {
+            "node": "Load Partnership Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Partnership Tracker": {
+      "main": [
+        [
+          {
+            "node": "Build 50-State Research Plan",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Only Reviewed and Verified Schools",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download PSS ZIP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build 50-State Research Plan": {
+      "main": [
+        [
+          {
+            "node": "Discover Private Universities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discover Private Universities": {
+      "main": [
+        [
+          {
+            "node": "Normalize and Apply Compliance Gates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize and Apply Compliance Gates": {
+      "main": [
+        [
+          {
+            "node": "Save New Prospects to Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only Reviewed and Verified Schools": {
+      "main": [
+        [
+          {
+            "node": "Draft Outreach (Not Sent)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Outreach (Not Sent)": {
+      "main": [
+        [
+          {
+            "node": "Save Draft and Status to Tracker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PSS ZIP": {
+      "main": [
+        [
+          {
+            "node": "Decompress ZIP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decompress ZIP": {
+      "main": [
+        [
+          {
+            "node": "Parse and Filter PSS CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and Filter PSS CSV": {
+      "main": [
+        [
+          {
+            "node": "Save New Prospects to Tracker1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save New Prospects to Tracker1": {
+      "main": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Update row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ee548c48-11e9-4ce4-b200-de8b5e12c330",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "50686c04f7230d72306ea84fcef193b604762390b3c9604878ace11cca84ea55"
+  },
+  "nodeGroups": [
+    {
+      "id": "a2d8fa70-bb44-4fe6-bbe7-a85b398bdc63",
+      "name": "Discover new prospects",
+      "nodeIds": [
+        "541c7f12-57ec-4cca-a7d4-437eb293ae9f",
+        "47c4435d-e8c9-43a3-b90b-776405743ff4",
+        "b4ec1e47-dfa2-422c-8d12-e43eb6644a6f",
+        "98a65ccc-04ad-4b38-8b75-db7cb29ceff5"
+      ],
+      "description": "Scans all 50 states for private universities, adds high school research tasks, and logs new rows as unverified and locked."
+    },
+    {
+      "id": "a35eddf9-3fb8-40e2-b766-22f58d836b8f",
+      "name": "Draft approved outreach",
+      "nodeIds": [
+        "739121f4-383e-4f0f-8de7-1e3c1206dc52",
+        "9a5e46fe-716c-42fb-858b-79cc0823b5a4",
+        "51ea57a9-0086-4d07-a01e-9f905ecbbe02"
+      ],
+      "description": "Only rows a human approved, with verified authorization and commission policy, get a draft saved. Nothing is emailed."
+    }
+  ],
+  "id": "oXlAVGsYd6sH3OoE",
+  "tags": []
+}
